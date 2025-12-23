@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>スマホ対応：バーチャルパッド版シューティング</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<style>
+  :root { --ui: rgba(0,0,0,0.35); }
+  html,body{
+    height:100%; margin:0; background:#050b1e; color:#fff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    overscroll-behavior:none; touch-action:none;
+    -webkit-user-select:none; user-select:none;
+  }
+  #app{
+    position:relative; width:100%; height:100%;
+    display:flex; align-items:center; justify-content:center;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+    box-sizing:border-box;
+  }
+  canvas{
+    background:#02091a; border-radius:14px; display:block;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+    touch-action:none; -webkit-tap-highlight-color: transparent;
+  }
+
+  /* HUD */
+  #hud{
+    position:absolute; left:12px; top:12px; z-index:20;
+    background: var(--ui); padding:10px 12px; border-radius:12px;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    pointer-events:none; max-width: 94vw; line-height:1.25;
+  }
+  #hud .title{ font-weight:900; letter-spacing:0.4px; margin-bottom:6px; }
+  #hud .row{ font-size:14px; }
+  #hud .hint{ margin-top:6px; font-size:12px; color:#cfcfcf; }
+
+  /* Overlay */
+  #overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    z-index:30; pointer-events:none; padding:16px;
+  }
+  #panel{
+    pointer-events:auto;
+    width:min(520px, 92vw);
+    background: rgba(0,0,0,0.72);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:16px;
+    padding:18px 16px;
+    text-align:center;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  }
+  #panel h2{ margin:0 0 10px; font-size:20px; }
+  #panel p{ margin:0 0 14px; color:#ddd; font-size:13px; line-height:1.45; }
+  button.big{
+    appearance:none; border:0; background:#2b8cff; color:#fff; font-weight:900;
+    border-radius:12px; padding:12px 18px; font-size:16px; cursor:pointer;
+    width:min(260px, 80vw);
+  }
+
+  /* ===== Mobile Controls ===== */
+  #controls{
+    position:absolute; inset:0; z-index:25; pointer-events:none;
+  }
+
+  /* Left stick */
+  #stickWrap{
+    position:absolute;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: 140px; height: 140px;
+    pointer-events:auto; touch-action:none;
+  }
+  #stickBase{
+    width: 140px; height: 140px; border-radius: 50%;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.10);
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+    position:relative;
+  }
+  #stickKnob{
+    width: 60px; height: 60px; border-radius:50%;
+    background: rgba(255,255,255,0.38);
+    border: 1px solid rgba(255,255,255,0.15);
+    position:absolute; left: 40px; top: 40px;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+  }
+
+  /* Shoot button */
+  #shootWrap{
+    position:absolute;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: 150px; height: 150px;
+    pointer-events:auto; touch-action:none;
+    display:flex; align-items:flex-end; justify-content:flex-end;
+  }
+  #shootBtn{
+    width: 110px; height: 110px; border-radius: 50%;
+    background: rgba(43,140,255,0.35);
+    border: 1px solid rgba(43,140,255,0.55);
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+    display:flex; align-items:center; justify-content:center;
+    font-weight: 900; letter-spacing: 0.4px;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+  }
+  #shootBtn small{ display:block; font-size:12px; opacity:0.9; margin-top:2px; }
+  #shootBtn:active{ transform: scale(0.98); }
+
+  /* small hint bubble */
+  #touchHint{
+    position:absolute;
+    right: 14px; bottom: 170px;
+    z-index:20;
+    background: rgba(0,0,0,0.25);
+    border:1px solid rgba(255,255,255,0.10);
+    border-radius:12px;
+    padding:8px 10px;
+    font-size:12px;
+    color:#cfcfcf;
+    pointer-events:none;
+    max-width: 70vw;
+  }
+
+  @media (max-width: 520px){
+    #hud .row{ font-size:13px; }
+    #hud .hint{ font-size:11px; }
+    #stickWrap{ width:130px; height:130px; }
+    #stickBase{ width:130px; height:130px; }
+    #stickKnob{ width:56px; height:56px; left:37px; top:37px; }
+    #shootBtn{ width:104px; height:104px; }
+    #touchHint{ bottom: 160px; font-size:11px; }
+  }
+</style>
+</head>
+
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="title">SHOOTER (MOBILE PAD)</div>
+    <div class="row">Score: <span id="score">0</span> / Lives: <span id="lives">3</span> / Lv: <span id="lv">1</span></div>
+    <div class="hint">
+      スマホ：左パッドで移動／右ボタン押しっぱなしで連射<br>
+      PC：←→ 移動／Space 発射／Enter開始
+    </div>
+  </div>
+
+  <div id="touchHint">指が邪魔にならない操作：左=移動、右=連射</div>
+
+  <canvas id="game"></canvas>
+
+  <div id="controls" aria-hidden="true">
+    <div id="stickWrap">
+      <div id="stickBase"><div id="stickKnob"></div></div>
+    </div>
+    <div id="shootWrap">
+      <div id="shootBtn">FIRE<small>hold</small></div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div id="panel">
+      <h2 id="panelTitle">READY</h2>
+      <p id="panelText">左下パッドで移動、右下FIREを押しっぱなしで連射。<br>これで敵弾が指に隠れにくくなります。</p>
+      <button class="big" id="startBtn">START</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== Canvas & DPR scaling =====
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const lvEl = document.getElementById('lv');
+
+  const overlay = document.getElementById('overlay');
+  const panelTitle = document.getElementById('panelTitle');
+  const panelText = document.getElementById('panelText');
+  const startBtn = document.getElementById('startBtn');
+
+  const LOGICAL_W = 480;
+  const LOGICAL_H = 640;
+  let dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+  function resize(){
+    dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const pad = 16;
+    const maxW = Math.min(window.innerWidth - pad*2, 900);
+    const maxH = Math.min(window.innerHeight - pad*2, 900);
+    const aspect = LOGICAL_W / LOGICAL_H;
+
+    let cssW = maxW;
+    let cssH = Math.round(cssW / aspect);
+    if (cssH > maxH) { cssH = maxH; cssW = Math.round(cssH * aspect); }
+
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+
+    canvas.width  = Math.floor(LOGICAL_W * dpr);
+    canvas.height = Math.floor(LOGICAL_H * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize, { passive:true });
+  resize();
+
+  // ===== Game state =====
+  const W = LOGICAL_W, H = LOGICAL_H;
+  let running = false;
+  let player, bullets, enemies, enemyBullets, boss;
+  let score = 0, lives = 3, level = 1;
+
+  // ===== Input (PC) =====
+  const key = {};
+  addEventListener('keydown', e => { key[e.code]=true; if(e.code==='Enter' && !running) startGame(); });
+  addEventListener('keyup', e => key[e.code]=false);
+
+  // ===== Virtual stick (left) =====
+  const stickWrap = document.getElementById('stickWrap');
+  const stickBase = document.getElementById('stickBase');
+  const knob = document.getElementById('stickKnob');
+
+  let stickTouchId = null;
+  let stickVec = { x:0, y:0, active:false };
+
+  function setKnob(nx, ny){
+    // nx,ny = -1..1
+    const max = 40;
+    const cx = (stickBase.clientWidth  - knob.clientWidth)/2;
+    const cy = (stickBase.clientHeight - knob.clientHeight)/2;
+    knob.style.left = (cx + nx*max) + 'px';
+    knob.style.top  = (cy + ny*max) + 'px';
+  }
+
+  function updateStickFromTouch(t){
+    const r = stickBase.getBoundingClientRect();
+    const cx = r.left + r.width/2;
+    const cy = r.top  + r.height/2;
+    const dx = t.clientX - cx;
+    const dy = t.clientY - cy;
+    const maxR = 48;
+    const d = Math.hypot(dx,dy);
+    const clamped = Math.min(maxR, d);
+    const ang = Math.atan2(dy,dx);
+    const nx = (Math.cos(ang) * (clamped/maxR));
+    const ny = (Math.sin(ang) * (clamped/maxR));
+    stickVec = { x:nx, y:ny, active:true };
+    setKnob(nx, ny);
+  }
+
+  stickWrap.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (stickTouchId !== null) return;
+    const t = e.changedTouches[0];
+    stickTouchId = t.identifier;
+    updateStickFromTouch(t);
+  }, { passive:false });
+
+  stickWrap.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.touches){
+      if (t.identifier === stickTouchId){
+        updateStickFromTouch(t);
+        break;
+      }
+    }
+  }, { passive:false });
+
+  function endStick(e){
+    e.preventDefault();
+    for (const t of e.changedTouches){
+      if (t.identifier === stickTouchId){
+        stickTouchId = null;
+        stickVec = { x:0, y:0, active:false };
+        setKnob(0,0);
+        break;
+      }
+    }
+  }
+  stickWrap.addEventListener('touchend', endStick, { passive:false });
+  stickWrap.addEventListener('touchcancel', endStick, { passive:false });
+
+  // ===== Shoot button (right) =====
+  const shootBtn = document.getElementById('shootBtn');
+  let shootTouchId = null;
+  let firing = false;
+
+  shootBtn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (shootTouchId !== null) return;
+    const t = e.changedTouches[0];
+    shootTouchId = t.identifier;
+    firing = true;
+  }, { passive:false });
+
+  shootBtn.addEventListener('touchend', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches){
+      if (t.identifier === shootTouchId){
+        shootTouchId = null;
+        firing = false;
+        break;
+      }
+    }
+  }, { passive:false });
+
+  shootBtn.addEventListener('touchcancel', e => {
+    e.preventDefault();
+    shootTouchId = null;
+    firing = false;
+  }, { passive:false });
+
+  // PC mouse start helper
+  canvas.addEventListener('mousedown', () => { if(!running) startGame(); });
+
+  // ===== Game logic =====
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    lvEl.textContent = level;
+  }
+
+  function spawnEnemies(){
+    enemies = [];
+    const cols = 4 + level;
+    const rows = 2 + Math.floor(level/2);
+    for (let r=0;r<rows;r++){
+      for (let c=0;c<cols;c++){
+        enemies.push({ x:60 + c*60, y:60 + r*50, w:28, h:16, alive:true });
+      }
+    }
+  }
+
+  function spawnBoss(){
+    boss = { x:W/2, y:80, w:100, h:36, hp:10 + level*5, dir:1, maxHp: 10 + level*5 };
+  }
+
+  let lastShot = 0;
+  function shoot(now){
+    if (!player) return;
+    if (now - lastShot < 120) return; // 連射気持ちよく
+    lastShot = now;
+    bullets.push({ x: player.x, y: player.y - 12 });
+  }
+
+  function hit(a,b){
+    return a.x-a.w/2<b.x+b.w/2 && a.x+a.w/2>b.x-b.w/2 &&
+           a.y-a.h/2<b.y+b.h/2 && a.y+a.h/2>b.y-b.h/2;
+  }
+
+  let lastTime = 0;
+
+  function startGame(){
+    player = { x:W/2, y:H-48, w:30, h:18, speed:280, hp:1 };
+    bullets = [];
+    enemyBullets = [];
+    boss = null;
+    score = 0;
+    lives = 3;
+    level = 1;
+    spawnEnemies();
+    running = true;
+    lastShot = 0;
+    lastTime = performance.now(); // dt暴走対策（超重要）
+    overlay.style.display = 'none';
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(){
+    running = false;
+    panelTitle.textContent = 'GAME OVER';
+    panelText.innerHTML = `Score: <b>${score}</b> / Lv: <b>${level}</b><br>STARTで最初から`;
+    overlay.style.display = 'flex';
+  }
+
+  function stageClear(){
+    level++;
+    spawnEnemies();
+    if (Math.random() < 0.4) spawnBoss();
+  }
+
+  function loop(t){
+    if (!running) return;
+
+    let dt = (t - lastTime)/1000;
+    lastTime = t;
+    dt = Math.max(0, Math.min(0.033, dt)); // clamp
+
+    // ===== Move =====
+    // PC
+    if (key.ArrowLeft)  player.x -= player.speed * dt;
+    if (key.ArrowRight) player.x += player.speed * dt;
+
+    // Mobile stick (dominant)
+    if (stickVec.active){
+      // 左右だけでもOKだが、気持ち良さのため微妙に上下も許可（避けやすくなる）
+      player.x += stickVec.x * player.speed * dt;
+      player.y += stickVec.y * player.speed * dt * 0.8;
+    }
+
+    player.x = Math.max(20, Math.min(W-20, player.x));
+    player.y = Math.max(H-140, Math.min(H-28, player.y)); // 画面下すぎ防止
+
+    // ===== Shoot =====
+    if (key.Space) shoot(t);
+    if (firing) shoot(t);
+
+    // ===== Bullets =====
+    bullets.forEach(b => b.y -= 560 * dt);
+    bullets = bullets.filter(b => b.y > -30);
+
+    enemyBullets.forEach(b => {
+      b.y += b.speed * dt;
+      if (b.dx) b.x += b.dx * dt;
+    });
+    enemyBullets = enemyBullets.filter(b => b.y < H + 30);
+
+    // ===== Enemies =====
+    enemies.forEach(e => {
+      if (!e.alive) return;
+      e.y += 10 * dt;
+      const shootProb = 0.0024 + level * 0.00045;
+      if (Math.random() < shootProb){
+        enemyBullets.push({ x:e.x, y:e.y+10, w:7, h:7, speed:170 + level*18 });
+      }
+    });
+
+    // ===== Boss =====
+    if (boss){
+      boss.x += boss.dir * (70 + level*10) * dt;
+      if (boss.x < 70 || boss.x > W-70) boss.dir *= -1;
+
+      if (Math.random() < 0.05){
+        for (let i=-2;i<=2;i++){
+          enemyBullets.push({
+            x: boss.x + i*12,
+            y: boss.y + 24,
+            w:7, h:7,
+            speed: 210 + level*28,
+            dx: i*40
+          });
+        }
+      }
+    }
+
+    // ===== Collisions =====
+    bullets.forEach(b => {
+      enemies.forEach(e => {
+        if (e.alive && hit({x:b.x,y:b.y,w:10,h:16}, e)){
+          e.alive = false;
+          b.dead = true;
+          score += 100;
+        }
+      });
+      if (boss && hit({x:b.x,y:b.y,w:10,h:16}, boss)){
+        boss.hp--;
+        b.dead = true;
+        if (boss.hp <= 0){
+          boss = null;
+          score += 2000;
+        }
+      }
+    });
+    bullets = bullets.filter(b => !b.dead);
+
+    enemyBullets.forEach(b => {
+      if (hit({x:b.x,y:b.y,w:b.w,h:b.h}, player)){
+        b.dead = true;
+        lives--;
+        // 小さな無敵時間を作るならここで（今回はシンプル維持）
+        player.x = W/2;
+        player.y = H-48;
+        if (lives <= 0){
+          lives = 0;
+          updateHUD();
+          endGame();
+        }
+      }
+    });
+    enemyBullets = enemyBullets.filter(b => !b.dead);
+
+    if (running && enemies.every(e => !e.alive) && !boss) stageClear();
+
+    updateHUD();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // player
+    ctx.fillStyle = '#7af';
+    ctx.fillRect(player.x - player.w/2, player.y - player.h/2, player.w, player.h);
+
+    // bullets (太くしてスマホで視認)
+    ctx.fillStyle = '#fff';
+    bullets.forEach(b => ctx.fillRect(b.x - 3, b.y - 8, 6, 16));
+
+    // enemies
+    enemies.forEach(e => {
+      if (!e.alive) return;
+      ctx.fillStyle = `hsl(${level*40},80%,60%)`;
+      ctx.fillRect(e.x - e.w/2, e.y - e.h/2, e.w, e.h);
+    });
+
+    // boss
+    if (boss){
+      ctx.fillStyle = '#f44';
+      ctx.fillRect(boss.x - boss.w/2, boss.y - boss.h/2, boss.w, boss.h);
+
+      // HP bar
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(boss.x - 44, boss.y - boss.h/2 - 12, 88, 7);
+      ctx.fillStyle = '#0f0';
+      ctx.fillRect(boss.x - 44, boss.y - boss.h/2 - 12, 88 * (boss.hp / boss.maxHp), 7);
+    }
+
+    // enemy bullets
+    ctx.fillStyle = '#ffb';
+    enemyBullets.forEach(b => ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h));
+  }
+
+  // UI hooks
+  startBtn.addEventListener('click', startGame);
+
+  // initial draw
+  // draw placeholder player to avoid blank
+  player = { x:W/2, y:H-48, w:30, h:18, speed:280 };
+  bullets = []; enemies = []; enemyBullets = []; boss=null;
+  draw();
+})();
+</script>
+</body>
+</html>
